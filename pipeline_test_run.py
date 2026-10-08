@@ -1,38 +1,3 @@
-# Import od uzivatela .shp, .geojson., .gpkg
-# Webovy formular, kde autor vyplni metadata (okrem tych, ktore sa daju extrahovat z dat - vystup v JSON
-
-# zostava vyriesit pripad, kedy SHP alebo GPKG od autora budu mat INSPIRE metadata v sebe - v takom pripade by nemusel vyplnat formular
-    # INSPIRE polia ulozene v datach by sa museli sparovat s CCMM+INSPIRE modelom, niektore polia by boli prazdne = autor by niektore musel doplnit = niektore = nesikovne
-
-    # teoreticky mozme vyzadovat, aby tie vstupne data mali INSPIRE v sebe, vo webovom formulari by boli iba tie, ktore INSPIRE nema (teda take, ktore nas CCMM-INSPIRE model vyzaduje naviac oproti INSPIRE)
-    # INSPIRE by sa extrahovali z dat a v kode by sa to zjednotilo s datami z formularu a nasledne publish do dspace
-
-# takisto zostava vyriesit nepriestorove data
-
-
-## Pipeline pre priestorove data
-
-# 1. CRS check - maju data od autora CRS? = dohodli sme sa ze musia mat (check_crs.py)
-    # funkciu treba otestovat, jak sa chova, ked je gpkg bez CRS (=nepodarilo sa mi taky v QGIS vytvorit, cez Python by to mohlo ist, viz. Gemini)
-        # gdf = gpd.GeoDataFrame({"id": [1, 2], "nazov": ["bod_A", "bod_B"]}, geometry=[Point(100, 200), Point(150, 250)], crs=None)
-
-# 2. Konvert vektoru na .gpkg = dohodli sme sa, ze budeme do dspace ukladat GPKG (convert_to_gpkg.py)
-    # treba sa zamysliet, ci povolime GPKG s viacerymi vrstvami v nom - moje riesenie s tymto nepocita
-
-# 3. Konvert rastru na .tif / .tiff - zatial nerieseny...
-
-# 3. Extrakcia CCMM+INSPIRE metadat z vektorov a rastrov (geometadata_extractor.py)
-    # zostava asi implementovat, aby extrahovala aj zvysne polozky z polia mdc.distribution, ako je napr. format, formatName, formatVersion apod. - to by mohlo ist kedze je to bud GPKG ale tif
-
-# 4. Poskladanie vsetkych metadat a publikacia datasetu do DSPACE
-
-# zostava doriesit:
-    # topology check + ine checky dat (pre topologiu ma INSPIRE nejake podmienky - 3.2.4.1. Topological consistency)
-    # transformace CRS do jednotneho (nejaky globalny WGS)
-
-    # ? chceme aj separatny validny INSPIRE.xml, ktory vezme vsetky (povinne aj nepovinne) INSPIRE polia z CCMM+INSPIRE a vytvori z nich validny INSPIRE xml subor (snad Jachym dal vsetky do INSPIRE-CCMM)
-
-
 from pathlib import Path
 import json
 
@@ -44,6 +9,7 @@ from vector_geometry_check import inspect_vector_quality
 #from leaflet_preview import geojson_preview
 from build_rest_payload import create_dspace_rest_payload
 
+#### LOAD TEST DATA
 #TEST_FILE = "test_data/zanikle.shp"
 #TEST_FILE = "test_data/zanikle.gpkg"
 #TEST_FILE = "test_data/zanikle.geojson"
@@ -105,7 +71,7 @@ def main():
             print(f" {status:<10} {check['check']:<24} {check['message']}")
         print("-" * 55)
 
-        # Ak zlyhá hneď prvá kontrola (prázdny dataset), zastavíme pipeline
+        # if emptyness-checks fails, we immediately stop
         if not quality_report["checks"][0]["passed"]:
             print("[!] Fatal: Dataset is empty. Aborting pipeline.\n")
             return
@@ -121,32 +87,32 @@ def main():
     gis_metadata = extract_gis_metadata(spatial_file)
     #print("[✓] Extraction finished.\n")
 
-    # Print results in human-readable JSON
+    # Print results in JSON
     print("=" * 55)
     print("EXTRACTED METADATA:")
     print("=" * 55)
     print(json.dumps(gis_metadata, indent=2, ensure_ascii=False))
     print("=" * 55 + "\n")
 
-    # 5. 
-    template_path = Path(METADATA_REST_FILE)
+    # 5. Step: Merge GIS metadata with the other metadata (NOT READY YET)
+    # template_path = Path(METADATA_REST_FILE)
 
-    if not template_path.exists():
-        print(f"[!] Error: Template metadata file not found: {template_path.resolve()}")
-        return
+    # if not template_path.exists():
+    #     print(f"[!] Error: Template metadata file not found: {template_path.resolve()}")
+    #     return
 
-    print("[>] Assembling final DSpace REST payload...")
-    dspace_payload = create_dspace_rest_payload(template_path, gis_metadata)
-    print("[✓] DSpace payload prepared in memory.")
+    # print("[>] Assembling final DSpace REST payload...")
+    # dspace_payload = create_dspace_rest_payload(template_path, gis_metadata)
+    # print("[✓] DSpace payload prepared in memory.")
 
-    # -------------------------------------------------------------
-    # Print results in human-readable JSON
-    # -------------------------------------------------------------
-    print("=" * 55)
-    print("FINAL DSPACE REST PAYLOAD (READY FOR INGEST):")
-    print("=" * 55)
-    print(json.dumps(dspace_payload, indent=2, ensure_ascii=False))
-    print("=" * 55 + "\n")
+    # # -------------------------------------------------------------
+    # # Print result
+    # # -------------------------------------------------------------
+    # print("=" * 55)
+    # print("FINAL DSPACE REST PAYLOAD (READY FOR INGEST):")
+    # print("=" * 55)
+    # print(json.dumps(dspace_payload, indent=2, ensure_ascii=False))
+    # print("=" * 55 + "\n")
 
 if __name__ == "__main__":
     main()
