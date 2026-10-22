@@ -136,25 +136,52 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
         return save_geojson_preview_with_metadata(temp_path, output_path, log)
 
     # --- STEP 3: Simplify geometry shapes ---
+    # File size is driven mainly by the number of vertices, so we remove vertices
+    # while keeping shapes recognizable. Points have nothing to simplify.
     geom_types = gdf.geom_type.unique()
     is_point_only = all(t in ['Point', 'MultiPoint'] for t in geom_types)
     is_polygon_only = all(t in ['Polygon', 'MultiPolygon'] for t in geom_types)
 
     if not is_point_only:
         print("Simplifying geometry...")
-        tolerance = 0.0005
-        # Polygon coverage (no overlaps): simplify shared edges once, so neighbours stay gap/overlap free
-        if is_polygon_only and shapely.coverage_is_valid(gdf[geom_col].values):
-            gdf[geom_col] = gdf[geom_col].simplify_coverage(tolerance=tolerance)
-            algorithm = "Visvalingam-Whyatt (coverage)"
-        else:
-            gdf[geom_col] = gdf[geom_col].simplify(tolerance=tolerance, preserve_topology=True)
-            algorithm = "Douglas-Peucker (topology preserving)"
-        size_mb = export_and_get_size(gdf, temp_path, precision=5)
+
+        # Tolerance = how far the simplified outline may deviate from the original.
+        # A fixed tolerance does not fit all data: 50 m is negligible for a country (~600 km)
+        # but turns a building (~20 m) into a triangle. Therefore the tolerance is derived
+        # from the typical feature size: for each feature take the longer side of its
+        # bounding box, then take the median over all features (robust to a few huge/tiny ones).
+        bounds = gdf.bounds
+        median_size = float((bounds['maxx'] - bounds['minx']).combine(bounds['maxy'] - bounds['miny'], max).median())
+
+        # Polygon coverage (non-overlapping polygons, e.g. countries): shared borders are
+        # simplified once, so neighbours stay without gaps/overlaps.
+        # Otherwise each feature is simplified on its own (borders may no longer match).
+        use_coverage = is_polygon_only and shapely.coverage_is_valid(gdf[geom_col].values)
+        algorithm = "Visvalingam-Whyatt (coverage)" if use_coverage else "Douglas-Peucker (topology preserving)"
+
+        # Try increasingly coarse tolerances (0.1-10 % of median feature size), stop at first fit.
+        # Each attempt simplifies the original geometry; if none fits, continue to STEP 4.
+        original_geoms = gdf[geom_col]
+        for factor in [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1]:
+            tolerance = round(factor * median_size, 7)
+            # Coordinates were already snapped to a 0.00001° grid (~1 m) in STEP 1, so a smaller
+            # tolerance would change nothing; skip it to avoid a useless export.
+            # The last factor always runs so that the loop produces a result.
+            if tolerance < 0.00001 and factor < 0.1:
+                continue
+            if use_coverage:
+                gdf[geom_col] = original_geoms.simplify_coverage(tolerance=tolerance)
+            else:
+                gdf[geom_col] = original_geoms.simplify(tolerance=tolerance, preserve_topology=True)
+            size_mb = export_and_get_size(gdf, temp_path, precision=5)
+            print(f"  tolerance {tolerance}° ({factor} x median feature size): {size_mb:.2f} MB")
+            if size_mb <= max_mb:
+                break
 
         log["steps_applied"].append("geometry_simplification")
         log["details"]["simplification_algorithm"] = algorithm
         log["details"]["simplification_tolerance_deg"] = tolerance
+        log["details"]["simplification_tolerance_factor"] = factor
 
         if size_mb <= max_mb:
             log["status"] = "success"
