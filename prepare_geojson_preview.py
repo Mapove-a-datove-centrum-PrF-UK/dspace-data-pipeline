@@ -135,18 +135,25 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
         print(f"Done. Size: {size_mb:.2f} MB")
         return save_geojson_preview_with_metadata(temp_path, output_path, log)
 
-    # --- STEP 3: Simplify geometry shapes using Douglas-Peucker algorithm ---
+    # --- STEP 3: Simplify geometry shapes ---
     geom_types = gdf.geom_type.unique()
     is_point_only = all(t in ['Point', 'MultiPoint'] for t in geom_types)
-    
+    is_polygon_only = all(t in ['Polygon', 'MultiPolygon'] for t in geom_types)
+
     if not is_point_only:
         print("Simplifying geometry...")
         tolerance = 0.0005
-        gdf[geom_col] = gdf[geom_col].simplify(tolerance=tolerance, preserve_topology=True)
+        # Polygon coverage (no overlaps): simplify shared edges once, so neighbours stay gap/overlap free
+        if is_polygon_only and shapely.coverage_is_valid(gdf[geom_col].values):
+            gdf[geom_col] = gdf[geom_col].simplify_coverage(tolerance=tolerance)
+            algorithm = "Visvalingam-Whyatt (coverage)"
+        else:
+            gdf[geom_col] = gdf[geom_col].simplify(tolerance=tolerance, preserve_topology=True)
+            algorithm = "Douglas-Peucker (topology preserving)"
         size_mb = export_and_get_size(gdf, temp_path, precision=5)
-        
+
         log["steps_applied"].append("geometry_simplification")
-        log["details"]["simplification_algorithm"] = "Douglas-Peucker"
+        log["details"]["simplification_algorithm"] = algorithm
         log["details"]["simplification_tolerance_deg"] = tolerance
 
         if size_mb <= max_mb:
@@ -195,8 +202,8 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
 
 # Example usage:
 result_log = geojson_preview(
-    "/home/pepa/MDC/test_data/czech_rivers.geojson", 
-    "/home/pepa/MDC/test_data/czech_rivers_simplified.geojson", 
+    "/home/pepa/MDC/test_data/world_countries.geojson", 
+    "/home/pepa/MDC/test_data/world_countries_simplified.geojson", 
     max_mb=5.0
 )
 print(json.dumps(result_log, indent=2))

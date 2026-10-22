@@ -1,1 +1,11 @@
 # dspace-data-pipeline
+
+### `prepare_geojson_preview.py`
+`geojson_preview(input_path, output_path, max_mb=5.0) -> dict`. Takes a GeoJSON and makes a preview that fits under `max_mb`. It applies the following reductions in order and stops as soon as the file is small enough:
+
+1. Reproject to WGS84 if needed, then round coordinates to 5 decimal places (about 1 m).
+2. Drop attributes, keeping only `id`, `name`, `nazev`, `typ`, `type`, `kategorie`, `category`. If none of these exist, it keeps the first column.
+3. Simplify geometry with tolerance 0.0005°. A polygon layer without overlaps (a valid coverage) uses `simplify_coverage`, so neighbouring polygons stay aligned with no gaps or overlaps. All other layers use `simplify(preserve_topology=True)`. Skipped for point layers.
+4. Keep only part of the features: the ones closest to the median centre of the dataset.
+
+A reduction log is stored in the output GeoJSON under the top-level key `preview_metadata`. It includes the steps that were applied, feature and attribute counts, and a `ui_summary` sentence that a map page can show in an info banner. The function also returns the log. If the file is still too large after step 4, `status` is set to `warning_size_exceeded`.
