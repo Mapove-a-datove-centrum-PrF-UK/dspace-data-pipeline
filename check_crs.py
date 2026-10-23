@@ -18,7 +18,7 @@ def has_crs(file_path: str | Path) -> bool:
     raw_crs = None
 
     try:
-        if suffix in [".shp", ".geojson", ".json", ".gpkg"]:
+        if suffix in [".shp", ".geojson", ".gpkg"]:
             info = pyogrio.read_info(path)
             raw_crs = info.get("crs")
         elif suffix in [".tif", ".tiff"]:

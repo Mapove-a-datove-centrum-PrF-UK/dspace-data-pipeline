@@ -7,7 +7,9 @@ from convert_to_gpkg import convert_to_gpkg
 from geometadata_extractor import extract_gis_metadata
 from vector_geometry_check import inspect_vector_quality
 #from leaflet_preview import geojson_preview
+from create_zip import zip_in_memory
 from build_rest_payload import create_dspace_rest_payload
+from dspace_insert import DSpaceClient
 
 #### LOAD TEST DATA
 #TEST_FILE = "test_data/zanikle.shp"
@@ -20,7 +22,7 @@ from build_rest_payload import create_dspace_rest_payload
 TEST_FILE = "test_data/obce_arccr.gpkg"
 METADATA_REST_FILE = "geoccmm_mandatory_example_restAPIformat.json"
 
-OUTPUT_DIR = "test_data/converted"
+#OUTPUT_DIR = "test_data/converted"
 
 
 def main():
@@ -46,40 +48,43 @@ def main():
     print("[✓] CRS is present and valid.")
 
     # 2. Step: Conversion if it's an unstandardized vector
-    is_vector = suffix in [".shp", ".geojson", ".gpkg"]
+    # is_vector = suffix in [".shp", ".geojson", ".gpkg"]
 
-    if suffix in [".shp", ".geojson", ".json"]:
-        print("[>] Converting vector to GeoPackage...")
-        spatial_file = convert_to_gpkg(input_path, output_dir=OUTPUT_DIR)
-        print(f"[✓] Created GeoPackage: {spatial_file}")
-    elif suffix in [".gpkg", ".tif", ".tiff"]:
-        print(f"[i] File is already standardized ({suffix}).")
-        spatial_file = input_path
-    else:
-        print(f"[!] Unsupported file format: {suffix}")
-        return
+    # if suffix in [".shp", ".geojson", ".json"]:
+    #     print("[>] Converting vector to GeoPackage...")
+    #     spatial_file = convert_to_gpkg(input_path, output_dir=OUTPUT_DIR)
+    #     print(f"[✓] Created GeoPackage: {spatial_file}")
+    # elif suffix in [".gpkg", ".tif", ".tiff"]:
+    #     print(f"[i] File is already standardized ({suffix}).")
+    #     spatial_file = input_path
+    # else:
+    #     print(f"[!] Unsupported file format: {suffix}")
+    #     return
 
     # 3. Step Vector Quality Checks
+    is_vector = suffix in [".shp", ".geojson", ".gpkg"]
     quality_report = None
-    if is_vector:
-        print("[>] Running vector quality & consistency checks...")
-        quality_report = inspect_vector_quality(spatial_file)
+    spatial_file = input_path
 
-        print("-" * 55)
-        for check in quality_report["checks"]:
-            status = "[✓] PASS" if check["passed"] else "[!] FAIL"
-            print(f" {status:<10} {check['check']:<24} {check['message']}")
-        print("-" * 55)
+    # if is_vector:
+    #     print("[>] Running vector quality & consistency checks...")
+    #     quality_report = inspect_vector_quality(spatial_file)
 
-        # if emptyness-checks fails, we immediately stop
-        if not quality_report["checks"][0]["passed"]:
-            print("[!] Fatal: Dataset is empty. Aborting pipeline.\n")
-            return
+    #     print("-" * 55)
+    #     for check in quality_report["checks"]:
+    #         status = "[✓] PASS" if check["passed"] else "[!] FAIL"
+    #         print(f" {status:<10} {check['check']:<24} {check['message']}")
+    #     print("-" * 55)
 
-        if not quality_report["all_passed"]:
-            print("[!] Warning: Vector dataset contains geometric/topological issues.")
-        else:
-            print("[✓] Vector dataset passed all quality checks.")
+    #     # if emptyness-checks fails, we immediately stop
+    #     if not quality_report["checks"][0]["passed"]:
+    #         print("[!] Fatal: Dataset is empty. Aborting pipeline.\n")
+    #         return
+
+    #     if not quality_report["all_passed"]:
+    #         print("[!] Warning: Vector dataset contains geometric/topological issues.")
+    #     else:
+    #         print("[✓] Vector dataset passed all quality checks.")
 
 
     # 4. Step: GIS metadata extraction
@@ -94,25 +99,44 @@ def main():
     print(json.dumps(gis_metadata, indent=2, ensure_ascii=False))
     print("=" * 55 + "\n")
 
-    # 5. Step: Merge GIS metadata with the other metadata (NOT READY YET)
-    # template_path = Path(METADATA_REST_FILE)
+    # 5. step: ZIP
+    print("[>] Compressing dataset into memory (ZIP)...")
+    zip_stream, zip_name, zip_size = zip_in_memory(spatial_file)
 
-    # if not template_path.exists():
-    #     print(f"[!] Error: Template metadata file not found: {template_path.resolve()}")
-    #     return
+    gis_metadata["bytes"] = zip_size
+    gis_metadata["filename"] = zip_name
 
-    # print("[>] Assembling final DSpace REST payload...")
-    # dspace_payload = create_dspace_rest_payload(template_path, gis_metadata)
-    # print("[✓] DSpace payload prepared in memory.")
+    print(f"[✓] In-memory ZIP created: {zip_name} ({zip_size} bytes)")
 
-    # # -------------------------------------------------------------
-    # # Print result
-    # # -------------------------------------------------------------
-    # print("=" * 55)
-    # print("FINAL DSPACE REST PAYLOAD (READY FOR INGEST):")
-    # print("=" * 55)
-    # print(json.dumps(dspace_payload, indent=2, ensure_ascii=False))
-    # print("=" * 55 + "\n")
+    # 6. Step: Merge GIS metadata with the other metadata
+    template_path = Path(METADATA_REST_FILE)
+
+    if not template_path.exists():
+        print(f"[!] Error: Template metadata file not found: {template_path.resolve()}")
+        return
+
+    print("[>] Assembling final DSpace REST payload...")
+    dspace_payload = create_dspace_rest_payload(template_path, gis_metadata)
+    print("[✓] DSpace payload prepared in memory.")
+
+    # -------------------------------------------------------------
+    # Print result
+    # -------------------------------------------------------------
+    print("=" * 55)
+    print("FINAL DSPACE REST PAYLOAD (READY FOR INGEST):")
+    print("=" * 55)
+    print(json.dumps(dspace_payload, indent=2, ensure_ascii=False))
+    print("=" * 55 + "\n")
+
+    # 7. insert ZIP + preview + all metadatas to Dspace
+
+
+
+
+    # 8. step: Import to Dspace
+    CONFIG_FILE = "config.env"
+    client = DSpaceClient(config_file=CONFIG_FILE)
+    result = client.deposit(metadata_payload=dspace_payload, spatial_file=zip_stream, filename=zip_name)
 
 if __name__ == "__main__":
     main()
