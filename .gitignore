@@ -1,1 +1,13 @@
 .venv/
+venv/
+__pycache__/
+test_data/
+.vscode/
+data/
+raw_data/
+
+*.zip
+*.tar.gz
+
+.env
+config.local.py
