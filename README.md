@@ -1,7 +1,7 @@
 # dspace-data-pipeline
 
 ### `prepare_geojson_preview.py`
-`geojson_preview(input_path, output_path, max_mb=5.0) -> dict`. Takes a GeoJSON and makes a preview that fits under `max_mb`. It applies the following reductions in order and stops as soon as the file is small enough:
+`geojson_preview(input_path, output_path, max_mb=5.0) -> dict`. Takes a vector file and makes a GeoJSON preview that fits under `max_mb`. If the input is not GeoJSON (e.g. Shapefile or GeoPackage), it is first converted with `convert_to_geojson.py` into a temporary file. The original CRS is kept, and the conversion is recorded in the log (`converted_from`). It applies the following reductions in order and stops as soon as the file is small enough:
 
 1. Reproject to WGS84 if needed, then round coordinates to 5 decimal places (about 1 m).
 2. Drop attributes, keeping only `id`, `name`, `nazev`, `typ`, `type`, `kategorie`, `category`. If none of these exist, it keeps the first column.
