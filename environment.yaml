@@ -1,0 +1,14 @@
+name: dspace
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.13
+  - geopandas>=1.1
+  - shapely>=2.1
+  - geos>=3.12
+  - pyogrio
+  - fiona
+  - rasterio
+  - pyproj
+  - requests

@@ -1,9 +1,12 @@
 import os
 import json
 import math
+import tempfile
 import geopandas as gpd
-import fiona
+import pyogrio
 import shapely
+
+from convert_to_geojson import convert_to_geojson
 
 def export_and_get_size(gdf_to_save, temp_file_path, precision=5):
     """Exports the GeoDataFrame to a temporary GeoJSON file and returns its size in MB."""
@@ -15,6 +18,8 @@ def save_geojson_preview_with_metadata(temp_path, output_path, log_data):
     
     # 1. Build a human-readable summary for the frontend UI (e.g., Leaflet info banner)
     messages = []
+    if "converted_from" in log_data:
+        messages.append(f"converted from {log_data['converted_from']} to GeoJSON")
     if "reprojection" in log_data["steps_applied"]:
         messages.append(f"reprojected from {log_data['original_crs']} to WGS84")
     if "coordinate_precision" in log_data["steps_applied"]:
@@ -74,15 +79,23 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
         "ui_summary": ""
     }
 
-    # 0. Check if the input file is a valid GeoJSON
+    # 0. Check if the input file is a readable vector file
     try:
-        with fiona.open(input_path) as src:
-            if src.driver not in ['GeoJSON', 'GeoJSONSeq']:
-                raise ValueError(f"Not GeoJSON, but: {src.driver}")
+        driver = pyogrio.read_info(input_path)["driver"]
     except Exception as e:
         raise ValueError(f"Error opening file: {e}")
 
-    gdf = gpd.read_file(input_path)
+    # Other geospatial vector formats are converted to GeoJSON first,
+    # into a temporary directory that is removed after loading
+    if driver not in ['GeoJSON', 'GeoJSONSeq']:
+        print(f"Converting {driver} to GeoJSON...")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            gdf = gpd.read_file(convert_to_geojson(input_path, output_dir=tmp_dir))
+        log["converted_from"] = driver
+    else:
+        gdf = gpd.read_file(input_path)
+
+    
     original_feature_count = len(gdf)
     log["details"]["features_original_count"] = original_feature_count
     log["details"]["features_kept_count"] = original_feature_count

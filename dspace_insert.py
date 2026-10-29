@@ -7,6 +7,7 @@ from pathlib import Path
 import mimetypes
 import requests
 import io
+import json
 
 from load_config import get_config
 
@@ -44,8 +45,6 @@ class DSpaceClient:
         # if not in headers, fallback to cookies
         if not token:
             token = self.session.cookies.get("DSPACE-XSRF-COOKIE")
-        #if not token:
-            #token = res.headers.get("D-XSRF-TOKEN") or self.session.cookies.get("D-XSRF-TOKEN")
 
         return token
 
@@ -121,9 +120,9 @@ class DSpaceClient:
 
         return res.json()
 
-    def create_original_bundle(self, item_uuid: str) -> str:
+    def get_or_create_bundle(self, item_uuid: str, name: str) -> str:
         """
-        Finds or creates the ORIGINAL bundle for the item.
+        Finds or creates a bundle with the given name (e.g. ORIGINAL, PREVIEW).
         Returns the bundle UUID required for bitstream attachment.
         """
 
@@ -135,18 +134,18 @@ class DSpaceClient:
         if res.status_code == 200:
             bundles = res.json().get("_embedded", {}).get("bundles", [])
             for b in bundles:
-                if b.get("name") == "ORIGINAL":
+                if b.get("name") == name:
                     return b["uuid"]
 
-        # Step 2: create 'ORIGINAL' bundle when not found
+        # Step 2: create the bundle when not found
         create_res = self.session.post(
             bundles_url,
-            json={"name": "ORIGINAL", "metadata": {}}
+            json={"name": name, "metadata": {}}
         )
 
         if create_res.status_code not in (200, 201):
             raise RuntimeError(
-                f"Failed to create ORIGINAL bundle ({create_res.status_code}): {create_res.text}"
+                f"Failed to create {name} bundle ({create_res.status_code}): {create_res.text}"
             )
 
         # Step 3: refresh CSRF token after bundle creation
@@ -156,10 +155,12 @@ class DSpaceClient:
 
         return create_res.json()["uuid"]
 
-    def upload_bitstream(self, bundle_uuid: str, file_obj: str | Path | io.BytesIO, filename: str = None,) -> dict:
+    def upload_bitstream(self, bundle_uuid: str, file_obj: str | Path | io.BytesIO, filename: str = None,
+                         mime_type: str = "application/zip", description: str = None) -> dict:
       """Uploads a file into the bundle via multipart/form-data.
 
       Accepts either a file path on disk or an in-memory BytesIO stream.
+      Optional description is stored as dc.description of the bitstream.
       """
       # if it is in-memory buffer (BytesIO)
       if isinstance(file_obj, io.BytesIO):
@@ -167,7 +168,7 @@ class DSpaceClient:
           raise ValueError(
               "Filename must be provided when uploading from BytesIO."
           )
-        files = {"file": (filename, file_obj, "application/zip")}
+        files = {"file": (filename, file_obj, mime_type)}
 
       # if it is file on disk
       else:
@@ -176,7 +177,14 @@ class DSpaceClient:
           raise FileNotFoundError(f"File not found: {path.resolve()}")
         filename = filename or path.name
         f = open(path, "rb")
-        files = {"file": (filename, f, "application/zip")}
+        files = {"file": (filename, f, mime_type)}
+
+      # optional bitstream metadata (sent as 'properties' form field)
+      data = {}
+      if description:
+        data["properties"] = json.dumps(
+            {"metadata": {"dc.description": [{"value": description}]}}
+        )
 
       url = f"{self.base_url}/core/bundles/{bundle_uuid}/bitstreams"
 
@@ -185,7 +193,7 @@ class DSpaceClient:
         headers["X-XSRF-TOKEN"] = self.session.headers["X-XSRF-TOKEN"]
 
       try:
-        res = self.session.post(url, files=files, headers=headers)
+        res = self.session.post(url, files=files, data=data, headers=headers)
       finally:
         if not isinstance(file_obj, io.BytesIO):
           f.close()
@@ -201,12 +209,14 @@ class DSpaceClient:
 
       return res.json()
 
-    def deposit(self, metadata_payload: dict, spatial_file: str | Path | io.BytesIO, filename: str = None, collection_uuid: str = None) -> dict:
+    def deposit(self, metadata_payload: dict, spatial_file: str | Path | io.BytesIO, filename: str = None,
+                collection_uuid: str = None, preview_file: str | Path = None,
+                preview_description: str = None) -> dict:
         """
         1. Authenticate session
         2. Create Item with metadata
-        3. Create ORIGINAL bundle
-        4. Upload spatial bitstream
+        3. Upload spatial bitstream into ORIGINAL bundle
+        4. (Optional) Upload GeoJSON preview into PREVIEW bundle
         """
 
         print("[>] Authenticating with DSpace REST API...")
@@ -219,15 +229,33 @@ class DSpaceClient:
         item_handle = item.get("handle", "pending")
         print(f"[✓] Item created (UUID: {item_uuid}, Handle: {item_handle}).")
 
-        print("[>] Uploading spatial bitstream...")
-        bundle_uuid = self.create_original_bundle(item_uuid)
+        print("[>] Uploading bitstream...")
+        bundle_uuid = self.get_or_create_bundle(item_uuid, "ORIGINAL")
         bitstream = self.upload_bitstream(bundle_uuid, spatial_file, filename=filename)
         bitstream_name = bitstream.get("name", filename or "uploaded_file")
         print(f"[✓] File '{bitstream_name}' uploaded successfully.")
+
+        # preview is optional - its failure does not abort the deposit
+        preview_bitstream_uuid = None
+        if preview_file:
+            print("[>] Uploading GeoJSON preview...")
+            try:
+                preview_bundle_uuid = self.get_or_create_bundle(item_uuid, "PREVIEW")
+                preview = self.upload_bitstream(
+                    preview_bundle_uuid,
+                    preview_file,
+                    mime_type="application/geo+json",
+                    description=preview_description,
+                )
+                preview_bitstream_uuid = preview.get("uuid")
+                print(f"[✓] Preview '{preview.get('name')}' uploaded into PREVIEW bundle.")
+            except (RuntimeError, FileNotFoundError) as e:
+                print(f"[!] Warning: preview upload failed: {e}")
 
         return {
             "item_uuid": item_uuid,
             "handle": item_handle,
             "bitstream_uuid": bitstream.get("uuid"),
+            "preview_bitstream_uuid": preview_bitstream_uuid,
             "item_url": f"{self.base_url}/core/items/{item_uuid}"
         }

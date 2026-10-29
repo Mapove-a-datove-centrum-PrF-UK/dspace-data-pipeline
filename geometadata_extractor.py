@@ -5,6 +5,7 @@ import rasterio
 from rasterio.warp import transform_bounds
 from shapely.geometry import box
 
+from create_zip import dataset_files
 
 def _format_crs_uri(crs_obj) -> str:
     """Formats a validated CRS instance into an official OGC URI."""
@@ -15,29 +16,6 @@ def _format_crs_uri(crs_obj) -> str:
         return f"http://www.opengis.net/def/crs/EPSG/0/{epsg_code}"
     
     return f"urn:ogc:def:crs:{crs_obj.to_string()}"
-
-def extract_gis_metadata(file_path: str | Path) -> dict:
-    """
-    Extracts INSPIRE-CCMM metadata attributes from standardized datasets (.gpkg or .tif).
-    Assumes the dataset has already passed CRS inspection.
-    """
-
-    path = Path(file_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Spatial data file not found: {path.resolve()}")
-
-    file_bytes = path.stat().st_size
-    suffix = path.suffix.lower()
-
-    if suffix in [".tif", ".tiff"]:
-        return _extract_raster_metadata(path, file_bytes)
-    elif suffix == ".gpkg":
-        return _extract_vector_metadata(path, file_bytes)
-    else:
-        raise ValueError(
-            f"Unsupported file format for extraction: '{suffix}'. "
-            "Expected .gpkg for vectors or .tif/.tiff for rasters."
-        )
 
 def _extract_vector_metadata(path: Path, file_bytes: int) -> dict:
     """
@@ -121,3 +99,28 @@ def _extract_raster_metadata(path: Path, file_bytes: int) -> dict:
             "resolution_slot": resolution_slot,
             "raster_bands_slots": raster_bands_slots,
         }
+
+def extract_gis_metadata(file_path: str | Path) -> dict:
+    """
+    Extracts INSPIRE-CCMM metadata attributes from datasets (.gpkg, .shp, .geojson or .tif).
+    Assumes the dataset has already passed CRS inspection.
+    """
+
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Spatial data file not found: {path.resolve()}")
+
+    # for shapefile sum the sizes of all its sidecar files
+    file_bytes = sum(f.stat().st_size for f in dataset_files(path))
+
+    suffix = path.suffix.lower()
+
+    if suffix in [".tif", ".tiff"]:
+        return _extract_raster_metadata(path, file_bytes)
+    elif suffix in [".gpkg", ".shp", ".geojson"]:
+        return _extract_vector_metadata(path, file_bytes)
+    else:
+        raise ValueError(
+            f"Unsupported file format for extraction: '{suffix}'. "
+            "Expected .gpkg/.shp/.geojson for vectors or .tif/.tiff for rasters."
+        )

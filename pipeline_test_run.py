@@ -3,26 +3,27 @@ import json
 
 # pipeline modules
 from check_crs import has_crs
-from convert_to_gpkg import convert_to_gpkg
 from geometadata_extractor import extract_gis_metadata
 from vector_geometry_check import inspect_vector_quality
-#from leaflet_preview import geojson_preview
 from create_zip import zip_in_memory
 from build_rest_payload import create_dspace_rest_payload
 from dspace_insert import DSpaceClient
+from prepare_geojson_preview import geojson_preview
 
 #### LOAD TEST DATA
-#TEST_FILE = "test_data/zanikle.shp"
 #TEST_FILE = "test_data/zanikle.gpkg"
 #TEST_FILE = "test_data/zanikle.geojson"
-#TEST_FILE = "test_data/zanikle.shp"
-
+TEST_FILE = "test_data/zanikle.shp"
 #TEST_FILE = "test_data/bez_crs/data_bez_crs.shp"
 
-TEST_FILE = "test_data/obce_arccr.gpkg"
+#TEST_FILE = r"test_data/obce_arccr.gpkg"
+PREVIEW_FILE = r"test_data/simplified/zanikle_simplified.geojson"
 METADATA_REST_FILE = "geoccmm_mandatory_example_restAPIformat.json"
+CONFIG_FILE = "config.env"
 
-#OUTPUT_DIR = "test_data/converted"
+# supported input formats
+VECTOR_SUFFIXES = [".shp", ".geojson", ".gpkg"]
+RASTER_SUFFIXES = [".tif", ".tiff"]
 
 
 def main():
@@ -33,10 +34,16 @@ def main():
         return
 
     suffix = input_path.suffix.lower()
+    is_vector = suffix in VECTOR_SUFFIXES
 
     print(f"\n--- Starting Pipeline ---")
     print(f"Input file: {input_path.name} (type: {suffix})")
 
+    if suffix not in VECTOR_SUFFIXES + RASTER_SUFFIXES:
+        print(f"[!] Error: Unsupported file format: {suffix}")
+        print("[!] Pipeline aborted.\n")
+        return
+    
     # 1. Step: CRS check
     print("[>] Validating dataset CRS...")
 
@@ -47,49 +54,33 @@ def main():
     
     print("[✓] CRS is present and valid.")
 
-    # 2. Step: Conversion if it's an unstandardized vector
-    # is_vector = suffix in [".shp", ".geojson", ".gpkg"]
-
-    # if suffix in [".shp", ".geojson", ".json"]:
-    #     print("[>] Converting vector to GeoPackage...")
-    #     spatial_file = convert_to_gpkg(input_path, output_dir=OUTPUT_DIR)
-    #     print(f"[✓] Created GeoPackage: {spatial_file}")
-    # elif suffix in [".gpkg", ".tif", ".tiff"]:
-    #     print(f"[i] File is already standardized ({suffix}).")
-    #     spatial_file = input_path
-    # else:
-    #     print(f"[!] Unsupported file format: {suffix}")
-    #     return
-
     # 3. Step Vector Quality Checks
-    is_vector = suffix in [".shp", ".geojson", ".gpkg"]
     quality_report = None
-    spatial_file = input_path
 
-    # if is_vector:
-    #     print("[>] Running vector quality & consistency checks...")
-    #     quality_report = inspect_vector_quality(spatial_file)
+    if is_vector:
+        print("[>] Running vector quality & consistency checks...")
+        quality_report = inspect_vector_quality(input_path)
 
-    #     print("-" * 55)
-    #     for check in quality_report["checks"]:
-    #         status = "[✓] PASS" if check["passed"] else "[!] FAIL"
-    #         print(f" {status:<10} {check['check']:<24} {check['message']}")
-    #     print("-" * 55)
+        print("-" * 55)
+        for check in quality_report["checks"]:
+            status = "[✓] PASS" if check["passed"] else "[!] FAIL"
+            print(f" {status:<10} {check['check']:<24} {check['message']}")
+        print("-" * 55)
 
-    #     # if emptyness-checks fails, we immediately stop
-    #     if not quality_report["checks"][0]["passed"]:
-    #         print("[!] Fatal: Dataset is empty. Aborting pipeline.\n")
-    #         return
+        # if emptyness-checks fails, we immediately stop
+        if not quality_report["checks"][0]["passed"]:
+            print("[!] Fatal: Dataset is empty. Aborting pipeline.\n")
+            return
 
-    #     if not quality_report["all_passed"]:
-    #         print("[!] Warning: Vector dataset contains geometric/topological issues.")
-    #     else:
-    #         print("[✓] Vector dataset passed all quality checks.")
+        if not quality_report["all_passed"]:
+            print("[!] Warning: Vector dataset contains geometric/topological issues.")
+        else:
+            print("[✓] Vector dataset passed all quality checks.")
 
 
     # 4. Step: GIS metadata extraction
     print("[>] Extracting metadata attributes...")
-    gis_metadata = extract_gis_metadata(spatial_file)
+    gis_metadata = extract_gis_metadata(input_path)
     #print("[✓] Extraction finished.\n")
 
     # Print results in JSON
@@ -101,7 +92,7 @@ def main():
 
     # 5. step: ZIP
     print("[>] Compressing dataset into memory (ZIP)...")
-    zip_stream, zip_name, zip_size = zip_in_memory(spatial_file)
+    zip_stream, zip_name, zip_size = zip_in_memory(input_path)
 
     gis_metadata["bytes"] = zip_size
     gis_metadata["filename"] = zip_name
@@ -128,15 +119,28 @@ def main():
     print(json.dumps(dspace_payload, indent=2, ensure_ascii=False))
     print("=" * 55 + "\n")
 
-    # 7. insert ZIP + preview + all metadatas to Dspace
+    # 7. step: Create GeoJSON preview
+    preview_file = None
+    preview_description = None
 
+    if is_vector:
+        print("[>] Creating GeoJSON preview...")
+        preview_file = PREVIEW_FILE
+        result_log = geojson_preview(input_path, preview_file, max_mb=5.0)
+        preview_description = result_log["ui_summary"]
+        print(json.dumps(result_log, indent=2))
+    else:
+        print("[i] Raster dataset - GeoJSON preview skipped.")
 
-
-
-    # 8. step: Import to Dspace
-    CONFIG_FILE = "config.env"
+    # 8. insert ZIP + preview + all metadatas to Dspace
     client = DSpaceClient(config_file=CONFIG_FILE)
-    result = client.deposit(metadata_payload=dspace_payload, spatial_file=zip_stream, filename=zip_name)
+    result = client.deposit(
+        metadata_payload=dspace_payload,
+        spatial_file=zip_stream,
+        filename=zip_name,
+        preview_file=preview_file,
+        preview_description=result_log["ui_summary"],
+    )
 
 if __name__ == "__main__":
     main()
