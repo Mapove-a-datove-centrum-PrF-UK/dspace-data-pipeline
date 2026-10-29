@@ -1,6 +1,7 @@
 {
 "type": "FeatureCollection",
 "name": "roads_prague9",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::32633" } },
 "features": [
 { "type": "Feature", "properties": { "OBJECTID_1": 1, "Shape_Length": 14.459116064003576 }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 464658.636599999852479, 5549974.256999999284744 ], [ 464663.49129999987781, 5549970.443099999800324 ], [ 464666.653300000354648, 5549966.871300000697374 ], [ 464669.491899999789894, 5549964.798000000417233 ] ] ] } },
 { "type": "Feature", "properties": { "OBJECTID_1": 2, "Shape_Length": 18.723256508669216 }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 464669.491899999789894, 5549964.798000000417233 ], [ 464673.747999999672174, 5549963.679700000211596 ], [ 464687.774400000460446, 5549960.781500000506639 ] ] ] } },

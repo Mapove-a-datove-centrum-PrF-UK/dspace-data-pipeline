@@ -9,8 +9,12 @@ import shapely
 from convert_to_geojson import convert_to_geojson
 
 def export_and_get_size(gdf_to_save, temp_file_path, precision=5):
-    """Exports the GeoDataFrame to a temporary GeoJSON file and returns its size in MB."""
-    gdf_to_save.to_file(temp_file_path, driver='GeoJSON', coordinate_precision=precision)
+    """Exports the GeoDataFrame to a temporary GeoJSON file and returns its size in MB.
+    precision=None keeps the full coordinate precision."""
+    if precision is None:
+        gdf_to_save.to_file(temp_file_path, driver='GeoJSON')
+    else:
+        gdf_to_save.to_file(temp_file_path, driver='GeoJSON', coordinate_precision=precision)
     return os.path.getsize(temp_file_path) / (1024 * 1024)
 
 def save_geojson_preview_with_metadata(temp_path, output_path, log_data):
@@ -62,7 +66,7 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
     Progressively applies reduction steps until the file size is below max_mb,
     embeds a metadata log directly into the resulting GeoJSON, and returns the log dictionary.
     """
-    temp_path = output_path + ".tmp"
+    temp_path = f"{output_path}.tmp"
     original_size_mb = os.path.getsize(input_path) / (1024 * 1024)
 
     log = {
@@ -85,16 +89,13 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
     except Exception as e:
         raise ValueError(f"Error opening file: {e}")
 
-    # Other geospatial vector formats are converted to GeoJSON first,
-    # into a temporary directory that is removed after loading
+    # Any supported vector format is read directly; the output is always written as GeoJSON
+    gdf = gpd.read_file(input_path)
     if driver not in ['GeoJSON', 'GeoJSONSeq']:
-        print(f"Converting {driver} to GeoJSON...")
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            gdf = gpd.read_file(convert_to_geojson(input_path, output_dir=tmp_dir))
         log["converted_from"] = driver
-    else:
-        gdf = gpd.read_file(input_path)
 
+    if gdf.crs is None:
+        raise ValueError(f"Cannot create preview for '{os.path.basename(input_path)}': CRS is missing.")
     
     original_feature_count = len(gdf)
     log["details"]["features_original_count"] = original_feature_count
@@ -108,6 +109,13 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
         gdf = gdf.to_crs(epsg=4326)
         log["reprojected_to_wgs84"] = True
         log["steps_applied"].append("reprojection")
+
+    # If the data already fits under max_mb, keep it unchanged (only reprojected, full precision)
+    size_mb = export_and_get_size(gdf, temp_path, precision=None)
+    if size_mb <= max_mb:
+        log["status"] = "success"
+        print(f"Done without reduction. Size: {size_mb:.2f} MB")
+        return save_geojson_preview_with_metadata(temp_path, output_path, log)
 
     # --- STEP 1: Reduce coordinate precision (5 decimal places ~= 1 meter precision) ---
     print("Reducing coordinate precision to 5 decimal places...")
@@ -240,10 +248,11 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
     return save_geojson_preview_with_metadata(temp_path, output_path, log)
 
 
-# Example usage:
-result_log = geojson_preview(
-    "/home/pepa/MDC/test_data/world_countries.geojson", 
-    "/home/pepa/MDC/test_data/world_countries_simplified.geojson", 
-    max_mb=5.0
-)
-print(json.dumps(result_log, indent=2))
+# Example usage (runs only when this file is executed directly, not on import):
+if __name__ == "__main__":
+    result_log = geojson_preview(
+        "/home/pepa/MDC/test_data/world_countries.geojson",
+        "/home/pepa/MDC/test_data/world_countries_simplified.geojson",
+        max_mb=5.0
+    )
+    print(json.dumps(result_log, indent=2))
