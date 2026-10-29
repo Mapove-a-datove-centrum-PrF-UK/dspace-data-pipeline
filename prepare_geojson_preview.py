@@ -9,8 +9,12 @@ import shapely
 from convert_to_geojson import convert_to_geojson
 
 def export_and_get_size(gdf_to_save, temp_file_path, precision=5):
-    """Exports the GeoDataFrame to a temporary GeoJSON file and returns its size in MB."""
-    gdf_to_save.to_file(temp_file_path, driver='GeoJSON', coordinate_precision=precision)
+    """Exports the GeoDataFrame to a temporary GeoJSON file and returns its size in MB.
+    precision=None keeps the full coordinate precision."""
+    if precision is None:
+        gdf_to_save.to_file(temp_file_path, driver='GeoJSON')
+    else:
+        gdf_to_save.to_file(temp_file_path, driver='GeoJSON', coordinate_precision=precision)
     return os.path.getsize(temp_file_path) / (1024 * 1024)
 
 def save_geojson_preview_with_metadata(temp_path, output_path, log_data):
@@ -108,6 +112,13 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
         gdf = gdf.to_crs(epsg=4326)
         log["reprojected_to_wgs84"] = True
         log["steps_applied"].append("reprojection")
+
+    # If the data already fits under max_mb, keep it unchanged (only reprojected, full precision)
+    size_mb = export_and_get_size(gdf, temp_path, precision=None)
+    if size_mb <= max_mb:
+        log["status"] = "success"
+        print(f"Done without reduction. Size: {size_mb:.2f} MB")
+        return save_geojson_preview_with_metadata(temp_path, output_path, log)
 
     # --- STEP 1: Reduce coordinate precision (5 decimal places ~= 1 meter precision) ---
     print("Reducing coordinate precision to 5 decimal places...")
@@ -242,8 +253,8 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
 
 # Example usage:
 result_log = geojson_preview(
-    "/home/pepa/MDC/test_data/world_countries.geojson", 
-    "/home/pepa/MDC/test_data/world_countries_simplified.geojson", 
+    "/home/pepa/MDC/test_data/buildings_prague9.geojson", 
+    "/home/pepa/MDC/test_data/buildings_prague9_simplified.geojson", 
     max_mb=5.0
 )
 print(json.dumps(result_log, indent=2))
