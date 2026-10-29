@@ -1,12 +1,9 @@
 import os
 import json
 import math
-import tempfile
 import geopandas as gpd
 import pyogrio
 import shapely
-
-from convert_to_geojson import convert_to_geojson
 
 def export_and_get_size(gdf_to_save, temp_file_path, precision=5):
     """Exports the GeoDataFrame to a temporary GeoJSON file and returns its size in MB.
@@ -66,7 +63,7 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
     Progressively applies reduction steps until the file size is below max_mb,
     embeds a metadata log directly into the resulting GeoJSON, and returns the log dictionary.
     """
-    temp_path = output_path + ".tmp"
+    temp_path = f"{output_path}.tmp"
     original_size_mb = os.path.getsize(input_path) / (1024 * 1024)
 
     log = {
@@ -89,15 +86,13 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
     except Exception as e:
         raise ValueError(f"Error opening file: {e}")
 
-    # Other geospatial vector formats are converted to GeoJSON first,
-    # into a temporary directory that is removed after loading
+    # Any supported vector format is read directly; the output is always written as GeoJSON
+    gdf = gpd.read_file(input_path)
     if driver not in ['GeoJSON', 'GeoJSONSeq']:
-        print(f"Converting {driver} to GeoJSON...")
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            gdf = gpd.read_file(convert_to_geojson(input_path, output_dir=tmp_dir))
         log["converted_from"] = driver
-    else:
-        gdf = gpd.read_file(input_path)
+
+    if gdf.crs is None:
+        raise ValueError(f"Cannot create preview for '{os.path.basename(input_path)}': CRS is missing.")
 
     
     original_feature_count = len(gdf)
@@ -251,10 +246,11 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
     return save_geojson_preview_with_metadata(temp_path, output_path, log)
 
 
-# Example usage:
-result_log = geojson_preview(
-    "/home/pepa/MDC/test_data/buildings_prague9.geojson", 
-    "/home/pepa/MDC/test_data/buildings_prague9_simplified.geojson", 
-    max_mb=5.0
-)
-print(json.dumps(result_log, indent=2))
+# Example usage (runs only when this file is executed directly, not on import):
+if __name__ == "__main__":
+    result_log = geojson_preview(
+        "/home/pepa/MDC/test_data/world_countries.geojson",
+        "/home/pepa/MDC/test_data/world_countries_simplified.geojson",
+        max_mb=5.0
+    )
+    print(json.dumps(result_log, indent=2))
