@@ -55,13 +55,18 @@ def save_geojson_preview_with_metadata(temp_path, output_path, log_data):
 
     geojson_dict["preview_metadata"] = log_data
 
-    # 3. Write back using compact separators to prevent whitespace file-size inflation
-    with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(geojson_dict, f, ensure_ascii=False, separators=(',', ':'))
+    # 3. Serialize with compact separators to prevent whitespace file-size inflation.
+    # The final size must be stored inside the file itself, but it is only known after
+    # serialization. So serialize once with a placeholder number to measure the size,
+    # then serialize again with the real value (the difference is a few bytes at most).
+    log_data["final_size_mb"] = 0.0
+    text = json.dumps(geojson_dict, ensure_ascii=False, separators=(',', ':'))
+    log_data["final_size_mb"] = round(len(text.encode("utf-8")) / (1024 * 1024), 2)
+    text = json.dumps(geojson_dict, ensure_ascii=False, separators=(',', ':'))
 
-    # Update final size after embedding metadata
-    log_data["final_size_mb"] = round(os.path.getsize(temp_path) / (1024 * 1024), 2)
-    
+    with open(temp_path, "w", encoding="utf-8") as f:
+        f.write(text)
+
     os.replace(temp_path, output_path)
     return log_data
 
