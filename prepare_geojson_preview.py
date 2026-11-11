@@ -8,6 +8,10 @@ import shapely
 
 from convert_to_geojson import convert_to_geojson
 
+# Below this average number of vertices per feature, geometry simplification is skipped
+# (a rectangle has 5, typical buildings 5-10).
+MIN_AVG_VERTICES_FOR_SIMPLIFICATION = 15
+
 def export_and_get_size(gdf_to_save, temp_file_path, precision=5):
     """Exports the GeoDataFrame to a temporary GeoJSON file and returns its size in MB.
     precision=None keeps the full coordinate precision."""
@@ -27,7 +31,9 @@ def save_geojson_preview_with_metadata(temp_path, output_path, log_data):
     if "reprojection" in log_data["steps_applied"]:
         messages.append(f"reprojected from {log_data['original_crs']} to WGS84")
     if "coordinate_precision" in log_data["steps_applied"]:
-        messages.append("coordinate precision reduced to 5 decimal places (~1 m)")
+        decimals = log_data["details"]["coordinate_precision"]
+        approx = {5: "~1 m", 6: "~10 cm", 7: "~1 cm"}[decimals]
+        messages.append(f"coordinate precision reduced to {decimals} decimal places ({approx})")
     if "attribute_reduction" in log_data["steps_applied"]:
         kept = len(log_data["details"]["attributes_kept"])
         orig = log_data["details"]["attributes_original_count"]
@@ -117,13 +123,33 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
         print(f"Done without reduction. Size: {size_mb:.2f} MB")
         return save_geojson_preview_with_metadata(temp_path, output_path, log)
 
-    # --- STEP 1: Reduce coordinate precision (5 decimal places ~= 1 meter precision) ---
-    print("Reducing coordinate precision to 5 decimal places...")
-    gdf['geometry'] = shapely.set_precision(gdf['geometry'].values, grid_size=0.00001)
-    size_mb = export_and_get_size(gdf, temp_path, precision=5)
-    
+    # Typical feature size: for each feature take the longer side of its bounding box,
+    # then take the median over all features (robust to a few huge/tiny ones).
+    # Used to adapt the coordinate precision (STEP 1) and the simplification tolerance (STEP 3).
+    bounds = gdf.bounds
+    median_size = float((bounds['maxx'] - bounds['minx']).combine(bounds['maxy'] - bounds['miny'], max).median())
+
+    # --- STEP 1: Reduce coordinate precision ---
+    # A fixed 5 decimal places (~1 m grid) is fine for large features but visibly distorts
+    # small ones (building corners shift by up to 0.5 m, right angles are lost).
+    # Therefore the precision follows the typical feature size:
+    #   < 0.0001° (~10 m)   -> 7 decimal places (~1 cm)
+    #   < 0.005°  (~0.5 km) -> 6 decimal places (~10 cm)
+    #   otherwise (and points, size 0) -> 5 decimal places (~1 m)
+    if 0 < median_size < 0.0001:
+        precision = 7
+    elif 0 < median_size < 0.005:
+        precision = 6
+    else:
+        precision = 5
+    grid_size = 10 ** -precision
+
+    print(f"Reducing coordinate precision to {precision} decimal places...")
+    gdf['geometry'] = shapely.set_precision(gdf['geometry'].values, grid_size=grid_size)
+    size_mb = export_and_get_size(gdf, temp_path, precision=precision)
+
     log["steps_applied"].append("coordinate_precision")
-    log["details"]["coordinate_precision"] = 5
+    log["details"]["coordinate_precision"] = precision
 
     if size_mb <= max_mb:
         log["status"] = "success"
@@ -145,7 +171,7 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
     keep_cols.append(geom_col)
     gdf = gdf[keep_cols]
 
-    size_mb = export_and_get_size(gdf, temp_path, precision=5)
+    size_mb = export_and_get_size(gdf, temp_path, precision=precision)
     
     log["steps_applied"].append("attribute_reduction")
     log["details"]["attributes_original_count"] = len(all_cols) - 1
@@ -163,16 +189,24 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
     is_point_only = all(t in ['Point', 'MultiPoint'] for t in geom_types)
     is_polygon_only = all(t in ['Polygon', 'MultiPolygon'] for t in geom_types)
 
-    if not is_point_only:
+    # Features with only a few vertices (e.g. buildings, ~5-10 vertices) have nothing to remove:
+    # simplification would only deform them (rectangle -> triangle) and save almost nothing.
+    # In that case skip simplification and go straight to reducing the number of features.
+    avg_vertices = float(shapely.get_num_coordinates(gdf[geom_col].values).mean())
+    log["details"]["avg_vertices_per_feature"] = round(avg_vertices, 1)
+    too_few_vertices = avg_vertices < MIN_AVG_VERTICES_FOR_SIMPLIFICATION
+
+    if too_few_vertices and not is_point_only:
+        print(f"Skipping simplification (only {avg_vertices:.1f} vertices per feature on average).")
+        log["details"]["simplification_skipped"] = "too few vertices per feature"
+
+    if not is_point_only and not too_few_vertices:
         print("Simplifying geometry...")
 
         # Tolerance = how far the simplified outline may deviate from the original.
         # A fixed tolerance does not fit all data: 50 m is negligible for a country (~600 km)
         # but turns a building (~20 m) into a triangle. Therefore the tolerance is derived
-        # from the typical feature size: for each feature take the longer side of its
-        # bounding box, then take the median over all features (robust to a few huge/tiny ones).
-        bounds = gdf.bounds
-        median_size = float((bounds['maxx'] - bounds['minx']).combine(bounds['maxy'] - bounds['miny'], max).median())
+        # from the typical feature size (median_size, computed before STEP 1).
 
         # Polygon coverage (non-overlapping polygons, e.g. countries): shared borders are
         # simplified once, so neighbours stay without gaps/overlaps.
@@ -185,16 +219,16 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
         original_geoms = gdf[geom_col]
         for factor in [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1]:
             tolerance = round(factor * median_size, 7)
-            # Coordinates were already snapped to a 0.00001° grid (~1 m) in STEP 1, so a smaller
+            # Coordinates were already snapped to the STEP 1 grid, so a smaller
             # tolerance would change nothing; skip it to avoid a useless export.
             # The last factor always runs so that the loop produces a result.
-            if tolerance < 0.00001 and factor < 0.1:
+            if tolerance < grid_size and factor < 0.1:
                 continue
             if use_coverage:
                 gdf[geom_col] = original_geoms.simplify_coverage(tolerance=tolerance)
             else:
                 gdf[geom_col] = original_geoms.simplify(tolerance=tolerance, preserve_topology=True)
-            size_mb = export_and_get_size(gdf, temp_path, precision=5)
+            size_mb = export_and_get_size(gdf, temp_path, precision=precision)
             print(f"  tolerance {tolerance}° ({factor} x median feature size): {size_mb:.2f} MB")
             if size_mb <= max_mb:
                 break
@@ -229,7 +263,7 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
 
     gdf = gdf.nsmallest(num_features_to_keep, 'dist_sq').drop(columns=['dist_sq'])
 
-    final_size_mb = export_and_get_size(gdf, temp_path, precision=5)
+    final_size_mb = export_and_get_size(gdf, temp_path, precision=precision)
     
     actual_kept_pct = round((len(gdf) / original_feature_count) * 100, 2)
     log["steps_applied"].append("feature_sampling")
