@@ -3,32 +3,28 @@ import json
 
 # pipeline modules
 from check_crs import has_crs
-
-#from geometadata_extractor import extract_gis_metadata
 from geometadata_extractor import extract_gis_metadata
-
 from vector_geometry_check import inspect_vector_quality
 from create_zip import zip_in_memory
-#from build_rest_payload import create_dspace_rest_payload
 from build_rest_payload import create_dspace_rest_payload
-
 from dspace_insert import DSpaceClient
 from prepare_geojson_preview import geojson_preview
 
 #### LOAD TEST DATA
 #TEST_FILE = "test_data/zanikle.gpkg"
 #TEST_FILE = "test_data/zanikle.geojson"
-TEST_FILE = "test_data/zanikle.shp"
+#TEST_FILE = "test_data/zanikle.shp"
 #TEST_FILE = "test_data/bez_crs/data_bez_crs.shp"
-#TEST_FILE = r"test_data/obce_arccr.gpkg"
 
-PREVIEW_FILE = r"test_data/simplified/zanikle_simplified.geojson"
+TEST_FILE = r"test_data/obce_arccr.gpkg"
+
+PREVIEW_FILE = r"test_data/simplified/obce_simplified.geojson"
 
 #METADATA_REST_FILE = "geoccmm_mandatory_example_restAPIformat.json"
-METADATA_REST_FILE = "ukazka_deposit_restAPIformat.json"
+METADATA_REST_FILE = "obce_deposit_restAPIformat.json"
+
 
 CONFIG_FILE = "config.env"
-
 # supported input formats
 VECTOR_SUFFIXES = [".shp", ".geojson", ".gpkg"]
 RASTER_SUFFIXES = [".tif", ".tiff"]
