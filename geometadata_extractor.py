@@ -3,9 +3,6 @@ from pathlib import Path
 import geopandas as gpd
 import rasterio
 from rasterio.warp import transform_bounds
-from shapely.geometry import box
-
-from create_zip import dataset_files
 
 def _format_crs_uri(crs_obj) -> str:
     """Formats a validated CRS instance into an official OGC URI."""
@@ -14,42 +11,36 @@ def _format_crs_uri(crs_obj) -> str:
 
     if epsg_code:
         return f"http://www.opengis.net/def/crs/EPSG/0/{epsg_code}"
-    
+
     return f"urn:ogc:def:crs:{crs_obj.to_string()}"
 
-def _extract_vector_metadata(path: Path, file_bytes: int) -> dict:
+def _extract_vector_metadata(path: Path) -> dict:
     """
-    Extracts MDC metadata from a standardized GeoPackage dataset.
-    Fields: mdc.spatial.bbox, mdc.spatial.crs, mdc.spatial.representation,
-            mdc.spatial.geometry, mdc.distribution (bytes, crs)
+    Extracts GeoCCMM metadata from a vector dataset (GeoPackage, Shapefile, GeoJSON).
+    Fields: geoccmm.bbox, geoccmm.crs, geoccmm.representation, geoccmm.distribution (bytes)
     """
     gdf = gpd.read_file(path)
 
     # Reproject bounds to WGS84 for INSPIRE bounding box
     minx, miny, maxx, maxy = transform_bounds(gdf.crs, "EPSG:4326", *gdf.total_bounds)
 
-    # build complex DSpace slot format for mdc.spatial.bbox: west;east;south;north
+    # build complex DSpace slot format for geoccmm.bbox: west;east;south;north
     bbox_slot = f"{round(float(minx), 8)};{round(float(maxx), 8)};{round(float(miny), 8)};{round(float(maxy), 8)}"
-
-    # footprint bounding box in WKT format (EPSG:4326)
-    bbox_wkt = box(minx, miny, maxx, maxy).wkt
 
     return {
         "representation": "vector",
-        "bytes": file_bytes,
+        #"bytes": file_bytes,
         "crs_uri": _format_crs_uri(gdf.crs),
         "bbox": bbox_slot,
-        "geometry_wkt": bbox_wkt,
-        "filename": path.name,
+        #"filename": path.name,
     }
 
 
-def _extract_raster_metadata(path: Path, file_bytes: int) -> dict:
+def _extract_raster_metadata(path: Path) -> dict:
     """
-    Extracts spatial, resolution, and band metadata from raster datasets.
-    Fields: mdc.spatial.bbox, mdc.spatial.crs, mdc.spatial.representation,
-            mdc.spatial.geometry, mdc.spatial.resolution, mdc.spatial.raster,
-            mdc.distribution (bytes, crs)
+    Extracts spatial and resolution metadata from raster datasets.
+    Fields: geoccmm.bbox, geoccmm.crs, geoccmm.representation,
+            geoccmm.resolution, geoccmm.distribution (bytes)
     """
     with rasterio.open(path) as src:
 
@@ -59,11 +50,8 @@ def _extract_raster_metadata(path: Path, file_bytes: int) -> dict:
         else:
             west, south, east, north = src.bounds
 
-        # complex DSpace slot format for mdc.spatial.bbox: west;east;south;north
+        # complex DSpace slot format for geoccmm.bbox: west;east;south;north
         bbox_slot = f"{round(float(west), 8)};{round(float(east), 8)};{round(float(south), 8)};{round(float(north), 8)}"
-
-        # bounding box in WKT format (EPSG:4326)
-        bbox_wkt = box(west, south, east, north).wkt
 
         # Extract spatial resolution (distance in metres)
         res_x = abs(src.transform[0])
@@ -76,33 +64,21 @@ def _extract_raster_metadata(path: Path, file_bytes: int) -> dict:
             meters_per_deg = 111_320.0 * math.cos(math.radians(mid_lat))
             res_m = res_x * meters_per_deg
 
-        # Complex DSpace slot for mdc.spatial.resolution: distance;scale (scale left empty)
+        # Complex DSpace slot for geoccmm.resolution: distance;scale (scale left empty)
         resolution_slot = f"{round(float(res_m), 2)};"
-
-        # Complex DSpace slot for mdc.spatial.raster: band;description;unit;dataType;noData;wavelength
-        raster_bands_slots = []
-        for i in range(1, src.count + 1):
-            band_desc = src.descriptions[i - 1] or ""
-            data_type = src.dtypes[i - 1]
-            nodata_val = str(src.nodatavals[i - 1]) if src.nodatavals[i - 1] is not None else ""
-
-            band_slot = f"{i};{band_desc};;{data_type};{nodata_val};"
-            raster_bands_slots.append(band_slot)
 
         return {
             "representation": "grid",
-            "bytes": file_bytes,
+            #"bytes": file_bytes,
             "crs_uri": _format_crs_uri(src.crs),
             "bbox": bbox_slot,
-            "geometry_wkt": bbox_wkt,
-            "filename": path.name,
+            #"filename": path.name,
             "resolution_slot": resolution_slot,
-            "raster_bands_slots": raster_bands_slots,
         }
 
 def extract_gis_metadata(file_path: str | Path) -> dict:
     """
-    Extracts INSPIRE-CCMM metadata attributes from datasets (.gpkg, .shp, .geojson or .tif).
+    Extracts GeoCCMM metadata attributes from datasets (.gpkg, .shp, .geojson or .tif).
     Assumes the dataset has already passed CRS inspection.
     """
 
@@ -110,15 +86,12 @@ def extract_gis_metadata(file_path: str | Path) -> dict:
     if not path.exists():
         raise FileNotFoundError(f"Spatial data file not found: {path.resolve()}")
 
-    # for shapefile sum the sizes of all its sidecar files
-    file_bytes = sum(f.stat().st_size for f in dataset_files(path))
-
     suffix = path.suffix.lower()
 
     if suffix in [".tif", ".tiff"]:
-        return _extract_raster_metadata(path, file_bytes)
+        return _extract_raster_metadata(path)
     elif suffix in [".gpkg", ".shp", ".geojson"]:
-        return _extract_vector_metadata(path, file_bytes)
+        return _extract_vector_metadata(path)
     else:
         raise ValueError(
             f"Unsupported file format for extraction: '{suffix}'. "
