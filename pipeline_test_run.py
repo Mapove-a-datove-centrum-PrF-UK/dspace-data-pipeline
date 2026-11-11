@@ -5,12 +5,12 @@ import json
 from check_crs import has_crs
 
 #from geometadata_extractor import extract_gis_metadata
-from geometadata_extractor_geoccmm import extract_gis_metadata
+from geometadata_extractor import extract_gis_metadata
 
 from vector_geometry_check import inspect_vector_quality
 from create_zip import zip_in_memory
 #from build_rest_payload import create_dspace_rest_payload
-from build_rest_payload_geoccmm import create_dspace_rest_payload
+from build_rest_payload import create_dspace_rest_payload
 
 from dspace_insert import DSpaceClient
 from prepare_geojson_preview import geojson_preview

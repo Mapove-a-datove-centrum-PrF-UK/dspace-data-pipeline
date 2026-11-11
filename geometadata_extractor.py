@@ -29,10 +29,8 @@ def _extract_vector_metadata(path: Path) -> dict:
 
     return {
         "representation": "vector",
-        #"bytes": file_bytes,
         "crs_uri": _format_crs_uri(gdf.crs),
-        "bbox": bbox_slot,
-        #"filename": path.name,
+        "bbox": bbox_slot
     }
 
 
@@ -69,10 +67,8 @@ def _extract_raster_metadata(path: Path) -> dict:
 
         return {
             "representation": "grid",
-            #"bytes": file_bytes,
             "crs_uri": _format_crs_uri(src.crs),
             "bbox": bbox_slot,
-            #"filename": path.name,
             "resolution_slot": resolution_slot,
         }
 
