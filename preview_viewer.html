@@ -17,23 +17,19 @@
   .leaflet-container .info-bar {
     background: rgba(255, 255, 255, 0.8);
     color: #333;
-    font-size: 12px;
     font-size: 0.75rem;
     line-height: 1.4;
     padding: 0 5px;
     margin: 0;
     width: 100%;
     box-sizing: border-box;
-    display: flex;
-    gap: 6px;
+    /* one line, cut with ... when too long */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  /* one line, cut with ... when too long */
-  .info-bar .text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .info-bar .more { flex: none; color: #0078a8; cursor: pointer; display: none; }
-  .info-bar.overflowing .more { display: inline; }
-  /* expanded on hover over "show more" */
-  .info-bar.expanded .text { white-space: normal; }
-  .info-bar.expanded .more { display: none; }
+  /* whole text shown on hover */
+  .leaflet-container .info-bar:hover { white-space: normal; }
 </style>
 </head>
 <body>
@@ -74,46 +70,47 @@ function showPreview(PREVIEW) {
         .map(([k, v]) => `<b>${k}</b>: ${v}`).join('<br>');
       if (props) l.bindPopup(props);
     }
-  }).addTo(map);
-  map.fitBounds(layer.getBounds());
+  });
+
+  // extent of the complete original data, from preview_metadata
+  const bbox = PREVIEW.preview_metadata && PREVIEW.preview_metadata.original_bbox_wgs84;
+  const extentBounds = bbox ? L.latLngBounds([bbox[1], bbox[0]], [bbox[3], bbox[2]]) : null;
+
+  // The map view has to be set before any vector layer is added, otherwise Leaflet
+  // draws the paths with a renderer that is not initialised yet.
+  // Zoom to the displayed features; the original extent is only a fallback for a file with no features.
+  const featureBounds = layer.getBounds();
+  map.fitBounds(featureBounds.isValid() ? featureBounds : extentBounds);
+  layer.addTo(map);
+
+  // dashed outline of the original extent
+  // Only the outline is clickable (fill: false), so clicks inside still reach the features.
+  if (extentBounds) {
+    L.rectangle(extentBounds, {
+      color: '#ffffff', weight: 3, dashArray: '6 6', fill: false
+    }).bindPopup('Original data extent').addTo(map);
+  }
 
   // info bar with ui_summary from preview_metadata
-  const InfoBar = L.Control.extend({
-    options: { position: 'bottomright' },
-    onAdd: function () {
-      const meta = PREVIEW.preview_metadata;
-      const div = L.DomUtil.create('div', 'info-bar');
-      L.DomEvent.disableClickPropagation(div);
-      if (!meta) {
-        div.textContent = 'No preview_metadata found in this file.';
-        return div;
-      }
-      const d = meta.details;
-      div.innerHTML = `
-        <span class="text">${meta.status !== 'success' ? '&#9888; ' : ''}${meta.ui_summary}
-          ${d.simplification_skipped ? '&middot; geometry not simplified (' + d.avg_vertices_per_feature + ' vertices per feature on average) ' : ''}
-          &middot; ${meta.input_file} &middot; original ${meta.original_size_mb} MB, preview ${meta.final_size_mb} MB &middot;
-          ${d.features_kept_count} of ${d.features_original_count} features shown &middot;
-          original CRS ${meta.original_crs}</span>
-        <span class="more">show more</span>`;
-
-      // hovering "show more" expands the line, leaving the bar collapses it again
-      div.querySelector('.more').addEventListener('mouseenter', () => div.classList.add('expanded'));
-      div.addEventListener('mouseleave', () => div.classList.remove('expanded'));
+  const infoBar = L.control({ position: 'bottomright' });
+  infoBar.onAdd = () => {
+    const meta = PREVIEW.preview_metadata;
+    const div = L.DomUtil.create('div', 'info-bar');
+    L.DomEvent.disableClickPropagation(div);
+    if (!meta) {
+      div.textContent = 'No preview_metadata found in this file.';
       return div;
     }
-  });
-  const infoBar = new InfoBar();
-  map.addControl(infoBar);
-
-  // show "show more" only when the text does not fit on one line
-  function checkOverflow() {
-    const bar = infoBar.getContainer();
-    const text = bar.querySelector('.text');
-    if (text) bar.classList.toggle('overflowing', text.scrollWidth > text.clientWidth);
-  }
-  checkOverflow();
-  window.addEventListener('resize', checkOverflow);
+    const d = meta.details;
+    div.innerHTML = `
+      ${meta.status !== 'success' ? '&#9888; ' : ''}${meta.ui_summary}
+      ${d.simplification_skipped ? '&middot; geometry not simplified (' + d.avg_vertices_per_feature + ' vertices per feature on average) ' : ''}
+      &middot; ${meta.input_file} &middot; original ${meta.original_size_mb} MB, preview ${meta.final_size_mb} MB &middot;
+      ${d.features_kept_count} of ${d.features_original_count} features shown`;
+    return div;
+  };
+  infoBar.addTo(map);
+  // added last so that the attribution sits above the info bar
   L.control.attribution({ position: 'bottomright' }).addTo(map);
 }
 </script>

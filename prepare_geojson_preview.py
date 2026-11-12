@@ -118,6 +118,11 @@ def geojson_preview(input_path, output_path, max_mb=5.0):
         log["reprojected_to_wgs84"] = True
         log["steps_applied"].append("reprojection")
 
+    # Extent of the complete original data (in WGS84), stored before any reduction,
+    # so the viewer can show the full extent even when only a sample of features is kept.
+    # Order follows the GeoJSON bbox convention: [min_lon, min_lat, max_lon, max_lat].
+    log["original_bbox_wgs84"] = [round(float(v), 6) for v in gdf.total_bounds]
+
     # If the data already fits under max_mb, keep it unchanged (only reprojected, full precision)
     size_mb = export_and_get_size(gdf, temp_path, precision=None)
     if size_mb <= max_mb:
