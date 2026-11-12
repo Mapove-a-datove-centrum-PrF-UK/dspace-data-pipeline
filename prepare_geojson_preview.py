@@ -1,16 +1,13 @@
 import os
 import json
 import math
-import tempfile
 import geopandas as gpd
 import pyogrio
 import shapely
 
-from convert_to_geojson import convert_to_geojson
 
 # Below this average number of vertices per feature, geometry simplification is skipped
-# (a rectangle has 5, typical buildings 5-10).
-MIN_AVG_VERTICES_FOR_SIMPLIFICATION = 15
+MIN_AVG_VERTICES_FOR_SIMPLIFICATION = 12
 
 def export_and_get_size(gdf_to_save, temp_file_path, precision=5):
     """Exports the GeoDataFrame to a temporary GeoJSON file and returns its size in MB.
