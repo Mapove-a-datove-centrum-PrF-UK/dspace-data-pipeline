@@ -9,6 +9,7 @@ from create_zip import zip_in_memory
 from build_rest_payload import create_dspace_rest_payload
 from dspace_insert import DSpaceClient
 from prepare_geojson_preview import geojson_preview
+from prepare_raster_preview import raster_preview
 
 #### LOAD TEST DATA
 #TEST_FILE = "test_data/zanikle.gpkg"
@@ -16,12 +17,13 @@ from prepare_geojson_preview import geojson_preview
 #TEST_FILE = "test_data/zanikle.shp"
 #TEST_FILE = "test_data/bez_crs/data_bez_crs.shp"
 
-TEST_FILE = r"test_data/obce_arccr.gpkg"
-
-PREVIEW_FILE = r"test_data/simplified/obce_simplified.geojson"
-
+#TEST_FILE = r"test_data/obce_arccr.gpkg"
+#PREVIEW_FILE = r"test_data/simplified/obce_simplified.geojson"
 #METADATA_REST_FILE = "geoccmm_mandatory_example_restAPIformat.json"
-METADATA_REST_FILE = "obce_deposit_restAPIformat.json"
+
+TEST_FILE = r"test_data/dem.tif"
+PREVIEW_FILE = r"test_data/simplified/dem.png"
+METADATA_REST_FILE = "dem_deposit_restAPIformat.json"
 
 
 CONFIG_FILE = "config.env"
@@ -123,7 +125,7 @@ def main():
     print(json.dumps(dspace_payload, indent=2, ensure_ascii=False))
     print("=" * 55 + "\n")
 
-    # 7. step: Create GeoJSON preview
+    # 7. step: Create PREVIEW
     preview_file = None
     preview_description = None
 
@@ -134,7 +136,9 @@ def main():
         preview_description = result_log["ui_summary"]
         print(json.dumps(result_log, indent=2))
     else:
-        print("[i] Raster dataset - GeoJSON preview skipped.")
+        preview_file = PREVIEW_FILE
+        result_log = raster_preview(input_path, preview_file, max_mb=5.0)
+        print(json.dumps(result_log, indent=2))
 
     # 8. insert ZIP + preview + all metadatas to Dspace
     client = DSpaceClient(config_file=CONFIG_FILE)
